@@ -61,14 +61,11 @@ jobs:
       - name: Set Virtual Memory / Page File to Max
         run: |
           Write-Host "Boosting virtual memory (page file) for more usable RAM..."
-          # Disable automatic page file via CIM
           $cs = Get-CimInstance -ClassName Win32_ComputerSystem
           Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $false }
 
-          # Remove existing page file settings
           Get-CimInstance -ClassName Win32_PageFileSetting -ErrorAction SilentlyContinue | Remove-CimInstance -ErrorAction SilentlyContinue
 
-          # Create new page file: 8GB initial, 16GB max
           New-CimInstance -ClassName Win32_PageFileSetting -Property @{
             Name = "C:\pagefile.sys"
             InitialSize = 8192
@@ -105,44 +102,4 @@ jobs:
 
           cmd.exe /c "echo ${{ env.ANYDESK_PASS }} | `"$ad`" --set-password"
 
-          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableUIADesktopToggle" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
-
-          $tsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations"
-          New-ItemProperty -Path $tsPath -Name "TouchMode" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
-          New-ItemProperty -Path $tsPath -Name "EnableTouchInjection" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
-
-          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarGlomLevel" -Value 0 -ErrorAction SilentlyContinue
-          Start-Process -FilePath $ad -ArgumentList "--restart-service" -Wait
-
-      - name: Minimize Windows & Set Low Resolution
-        run: |
-          $shell = New-Object -ComObject Shell.Application
-          $shell.MinimizeAll()
-          Set-DisplayResolution -Width 1280 -Height 720 -Force -ErrorAction SilentlyContinue
-
-      - name: Download & Install Opera GX
-        run: |
-          $url = "https://net.geo.opera.com/opera_gx/stable/windows?utm_source=inf&utm_medium=gx"
-          $installer = "$env:TEMP\OperaGXSetup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList "--silent=1", "--allusers=1", "--launchbrowser=0", "--desktopshortcut=1" -Wait
-
-          $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
-          if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
-          Start-Process -FilePath $operaExe -ArgumentList "--no-first-run"
-
-          for ($i = 1; $i -le 15; $i++) {
-            $prefPath = "$env:APPDATA\Opera Software\Opera GX Stable\Default\Preferences"
-            if (Test-Path $prefPath) { break }
-            Start-Sleep -Seconds 2
-          }
-
-      - name: Keep Alive
-        run: |
-          Write-Host "========================================="
-          Write-Host "  RDP LIVE — AnyDesk Password: ${{ env.ANYDESK_PASS }}"
-          Write-Host "  Virtual RAM: 8-16GB page file"
-          Write-Host "  Resolution: 1280x720"
-          Write-Host "  Max performance mode ON"
-          Write-Host "========================================="
-          Start-Sleep -Seconds (${{ env.RUNTIME_MINUTES }} * 60)
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableUI
