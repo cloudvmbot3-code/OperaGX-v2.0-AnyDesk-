@@ -46,6 +46,77 @@ jobs:
             Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
           }
 
+      - name: Hide Virtual Machine Detection
+        run: |
+          Write-Host "Hiding VM signatures..."
+
+          # Spoof BIOS/System info to look like real hardware
+          $regPaths = @(
+            "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation",
+            "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000"
+          )
+
+          # Fake the system manufacturer and model
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "SystemManufacturer" -Value "Dell Inc." -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "SystemProductName" -Value "Inspiron 15 5000" -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "BIOSVersion" -Value "1.14.0" -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation" -Name "BIOSReleaseDate" -Value "03/15/2023" -Force -ErrorAction SilentlyContinue
+
+          # Hide Hyper-V / Azure VM registry keys
+          $vmKeys = @(
+            "HKLM:\SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Virtualization",
+            "HKLM:\HARDWARE\ACPI\DSDT\VRTUAL",
+            "HKLM:\HARDWARE\ACPI\FADT\VRTUAL",
+            "HKLM:\HARDWARE\ACPI\RSDT\VRTUAL"
+          )
+          foreach ($key in $vmKeys) {
+            if (Test-Path $key) {
+              Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "Removed: $key"
+            }
+          }
+
+          # Rename Hyper-V video driver to generic
+          $videoPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000"
+          if (Test-Path $videoPath) {
+            Set-ItemProperty -Path $videoPath -Name "DriverDesc" -Value "NVIDIA GeForce GTX 1660" -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $videoPath -Name "ProviderName" -Value "NVIDIA" -Force -ErrorAction SilentlyContinue
+          }
+
+          # Hide VM-specific services
+          $vmServices = @("vmicheartbeat", "vmicshutdown", "vmicguestinterface", "vmicrdv", "vmictimesync", "vmicvss")
+          foreach ($svc in $vmServices) {
+            Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+            Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+          }
+
+          # Fake disk info — VMs usually show "Virtual Disk"
+          $diskPath = "HKLM:\SYSTEM\CurrentControlSet\Services\disk\Enum"
+          if (Test-Path $diskPath) {
+            Set-ItemProperty -Path $diskPath -Name "0" -Value "IDE\DiskSamsung_SSD_860_EVO_500GB\5&1234abcd&0&0.0.0" -Force -ErrorAction SilentlyContinue
+          }
+
+          # Kill VMware/VBox/Hyper-V related processes
+          $vmProcesses = @("vmtoolsd", "vmwaretray", "VBoxService", "VBoxTray", "vmcompute", "vmms")
+          foreach ($proc in $vmProcesses) {
+            Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+          # Fake MAC address prefix (VMs use specific ones)
+          $adapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
+          if ($adapter) {
+            Set-NetAdapter -Name $adapter.Name -MacAddress "D4-BE-D9-A1-B2-C3" -Confirm:$false -ErrorAction SilentlyContinue
+          }
+
+          # WMI anti-detection: fake the Win32_ComputerSystem model
+          $regWmi = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"
+          New-Item -Path $regWmi -Force -ErrorAction SilentlyContinue | Out-Null
+          Set-ItemProperty -Path $regWmi -Name "Manufacturer" -Value "Dell Inc." -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path $regWmi -Name "Model" -Value "Inspiron 15 5000" -Force -ErrorAction SilentlyContinue
+
+          Write-Host "VM detection signatures hidden"
+
       - name: Max Performance Power Plan & Visual Effects Off
         run: |
           Write-Host "Setting max performance mode..."
