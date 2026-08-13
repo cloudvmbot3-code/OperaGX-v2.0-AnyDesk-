@@ -43,26 +43,6 @@ jobs:
             Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
           }
 
-      - name: Nuke Pre-Installed Bloat to Free RAM & Disk
-        run: |
-          Write-Host "Removing heavy pre-installed software..."
-          $bloatPaths = @(
-            "C:\Program Files\Microsoft Visual Studio",
-            "C:\Program Files (x86)\Microsoft Visual Studio",
-            "C:\Program Files\dotnet",
-            "C:\Program Files (x86)\Microsoft SDKs",
-            "C:\hostedtoolcache",
-            "C:\Program Files\Unity Hub",
-            "C:\Program Files\R"
-          )
-          foreach ($path in $bloatPaths) {
-            if (Test-Path $path) {
-              Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Removed: $path"
-            }
-          }
-          Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
-
       - name: Max Performance Power Plan & Visual Effects Off
         run: |
           Write-Host "Setting max performance mode..."
@@ -81,10 +61,20 @@ jobs:
       - name: Set Virtual Memory / Page File to Max
         run: |
           Write-Host "Boosting virtual memory (page file) for more usable RAM..."
-          wmic computersystem where name="%computername%" set AutomaticManagedPagefile=False
-          wmic pagefileset delete
-          wmic pagefileset create name="C:\pagefile.sys"
-          wmic pagefileset where name="C:\\pagefile.sys" set InitialSize=8192,MaximumSize=16384
+          # Disable automatic page file via CIM
+          $cs = Get-CimInstance -ClassName Win32_ComputerSystem
+          Set-CimInstance -InputObject $cs -Property @{ AutomaticManagedPagefile = $false }
+
+          # Remove existing page file settings
+          Get-CimInstance -ClassName Win32_PageFileSetting -ErrorAction SilentlyContinue | Remove-CimInstance -ErrorAction SilentlyContinue
+
+          # Create new page file: 8GB initial, 16GB max
+          New-CimInstance -ClassName Win32_PageFileSetting -Property @{
+            Name = "C:\pagefile.sys"
+            InitialSize = 8192
+            MaximumSize = 16384
+          } -ErrorAction SilentlyContinue
+
           Write-Host "Virtual RAM boosted: 8GB-16GB page file set"
 
       - name: Wipe Desktop Icons
@@ -153,6 +143,6 @@ jobs:
           Write-Host "  RDP LIVE — AnyDesk Password: ${{ env.ANYDESK_PASS }}"
           Write-Host "  Virtual RAM: 8-16GB page file"
           Write-Host "  Resolution: 1280x720"
-          Write-Host "  All bloat removed, max performance ON"
+          Write-Host "  Max performance mode ON"
           Write-Host "========================================="
           Start-Sleep -Seconds (${{ env.RUNTIME_MINUTES }} * 60)
