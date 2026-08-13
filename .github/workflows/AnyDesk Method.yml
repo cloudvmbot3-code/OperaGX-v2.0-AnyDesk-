@@ -3,9 +3,12 @@ name: AnyDesk
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '50 */6 * * *'
 
 permissions:
   contents: read
+  actions: write
 
 defaults:
   run:
@@ -14,10 +17,10 @@ defaults:
 jobs:
   rdp:
     runs-on: windows-latest
-    timeout-minutes: 4320
+    timeout-minutes: 350
+
     env:
-      ANYDESK_PASS: Pass@1234
-      RUNTIME_MINUTES: 4320
+      ANYDESK_PASS: ${{ secrets.ANYDESK_PASS }}
 
     steps:
       - name: Kill Background Services & Free RAM
@@ -160,10 +163,65 @@ jobs:
             Start-Sleep -Seconds 2
           }
 
+      - name: Install Mesa3D Software OpenGL Renderer
+        run: |
+          Write-Host "Installing Mesa3D for software OpenGL..."
+
+          # Download Mesa3D release
+          $mesaPage = Invoke-RestMethod "https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest"
+          $mesaAsset = $mesaPage.assets | Where-Object { $_.name -match "release-msvc.*\.7z$" } | Select-Object -First 1
+          $mesaUrl = $mesaAsset.browser_download_url
+          $mesaArchive = "$env:TEMP\mesa3d.7z"
+          $mesaDir = "$env:TEMP\mesa3d"
+
+          Invoke-WebRequest -Uri $mesaUrl -OutFile $mesaArchive
+
+          # Install 7-Zip if not available
+          if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
+            $7zPage = Invoke-RestMethod "" -ErrorAction SilentlyContinue
+            choco install 7zip -y --no-progress 2>$null
+          }
+
+          & "C:\Program Files\7-Zip\7z.exe" x $mesaArchive -o"$mesaDir" -y
+
+          # Find the x64 opengl32.dll
+          $mesaDll = Get-ChildItem -Path $mesaDir -Recurse -Filter "opengl32.dll" | Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
+
+          if ($mesaDll) {
+            Copy-Item $mesaDll.FullName "C:\Windows\System32\opengl32sw.dll" -Force -ErrorAction SilentlyContinue
+
+            [Environment]::SetEnvironmentVariable("GALLIUM_DRIVER", "llvmpipe", "Machine")
+            [Environment]::SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "4.5", "Machine")
+            [Environment]::SetEnvironmentVariable("LIBGL_ALWAYS_SOFTWARE", "true", "Machine")
+
+            # Copy to Java bin so Minecraft picks it up
+            $javaDir = (Get-Command java -ErrorAction SilentlyContinue).Source | Split-Path
+            if ($javaDir) {
+              Copy-Item $mesaDll.FullName "$javaDir\opengl32.dll" -Force -ErrorAction SilentlyContinue
+              Write-Host "Mesa3D copied to Java: $javaDir"
+            }
+
+            # Also drop it in common TLauncher locations
+            $tlPaths = @(
+              "$env:APPDATA\.minecraft",
+              "$env:APPDATA\.tlauncher",
+              "$env:USERPROFILE\.minecraft"
+            )
+            foreach ($p in $tlPaths) {
+              if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
+              Copy-Item $mesaDll.FullName "$p\opengl32.dll" -Force -ErrorAction SilentlyContinue
+            }
+
+            Write-Host "Mesa3D Software OpenGL installed successfully"
+          } else {
+            Write-Host "WARNING: Could not find Mesa opengl32.dll"
+          }
+
+          Remove-Item $mesaArchive -Force -ErrorAction SilentlyContinue
+
       - name: Keep Alive
         run: |
-          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
-          $end = (Get-Date).AddMinutes($mins)
+          $end = (Get-Date).AddMinutes(345)
           while ((Get-Date) -lt $end) {
             Write-Host ("Cloud PC Heartbeat " + (Get-Date).ToString("HH:mm:ss") + " | Active until " + $end.ToString("HH:mm:ss"))
             Start-Sleep -Seconds 60
