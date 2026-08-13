@@ -108,26 +108,34 @@ jobs:
 
           "%AD%" --restart-service
 
-      - name: Get AnyDesk ID
+      - name: Fetch and Display AnyDesk Connection Address
         run: |
-          $ad = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
-          if (-not (Test-Path $ad)) { $ad = "C:\Program Files\AnyDesk\AnyDesk.exe" }
+          $confPath = "C:\ProgramData\AnyDesk\system.conf"
+          $cleanId = ""
 
-          for ($i = 1; $i -le 30; $i++) {
-            $id = & $ad --get-id 2>$null
-            if ($id -and $id -match '^\d+') {
-              Write-Host "========================================="
-              Write-Host "  YOUR ANYDESK ID: $id"
-              Write-Host "  PASSWORD: ${{ env.ANYDESK_PASS }}"
-              Write-Host "========================================="
-              break
+          for ($i = 1; $i -le 10; $i++) {
+            if (Test-Path $confPath) {
+              $content = Get-Content $confPath -Raw
+              if ($content -match 'ad\.anynet\.id=(\d+)') {
+                $cleanId = $Matches[1]
+                break
+              }
             }
-            Write-Host "Waiting for AnyDesk ID... attempt $i/30"
-            Start-Sleep -Seconds 5
+            Start-Sleep -Seconds 4
           }
-          if (-not $id -or $id -notmatch '^\d+') {
-            Write-Host "ERROR: AnyDesk failed to get an ID after 150 seconds"
-          }
+
+          $ESC = [char]27
+          $Green = "$ESC[32m"
+          $Yellow = "$ESC[33m"
+          $Red = "$ESC[31m"
+          $Reset = "$ESC[0m"
+
+          Write-Host "${Green}====================================================${Reset}"
+          Write-Host "${Green}        ANYDESK CLOUD MACHINE IS READY TO CONNECT     ${Reset}"
+          Write-Host "${Green}====================================================${Reset}"
+          Write-Host "${Yellow} CONNECTION ID : ${Red}${cleanId}${Reset}"
+          Write-Host "${Yellow} PASSWORD      : ${Red}${{ env.ANYDESK_PASS }}${Reset}"
+          Write-Host "${Green}====================================================${Reset}"
 
       - name: Minimize Windows & Set Low Resolution
         run: |
@@ -154,10 +162,9 @@ jobs:
 
       - name: Keep Alive
         run: |
-          Write-Host "========================================="
-          Write-Host "  RDP LIVE — AnyDesk Password: ${{ env.ANYDESK_PASS }}"
-          Write-Host "  Virtual RAM: 8-16GB page file"
-          Write-Host "  Resolution: 1280x720"
-          Write-Host "  Max performance mode ON"
-          Write-Host "========================================="
-          Start-Sleep -Seconds (${{ env.RUNTIME_MINUTES }} * 60)
+          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
+          $end = (Get-Date).AddMinutes($mins)
+          while ((Get-Date) -lt $end) {
+            Write-Host ("Cloud PC Heartbeat " + (Get-Date).ToString("HH:mm:ss") + " | Active until " + $end.ToString("HH:mm:ss"))
+            Start-Sleep -Seconds 60
+          }
