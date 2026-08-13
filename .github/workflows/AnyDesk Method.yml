@@ -23,20 +23,18 @@ jobs:
       - name: Kill Background Services & Free RAM
         run: |
           Write-Host "Stopping resource-hogging services..."
-          # Stop Windows Defender real-time scanning
           Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
 
-          # Kill heavy services
           $services = @(
-            "WSearch",           # Windows Search
-            "wuauserv",          # Windows Update
-            "DiagTrack",         # Telemetry
-            "SysMain",           # Superfetch
-            "WbioSrvc",          # Biometric
+            "WSearch",
+            "wuauserv",
+            "DiagTrack",
+            "SysMain",
+            "WbioSrvc",
             "TabletInputService",
-            "wisvc",             # Windows Insider
-            "MapsBroker",        # Maps
-            "XblAuthManager",    # Xbox
+            "wisvc",
+            "MapsBroker",
+            "XblAuthManager",
             "XblGameSave",
             "XboxNetApiSvc"
           )
@@ -48,7 +46,6 @@ jobs:
       - name: Nuke Pre-Installed Bloat to Free RAM & Disk
         run: |
           Write-Host "Removing heavy pre-installed software..."
-          # Remove VS, SDKs, and other huge apps eating storage/RAM
           $bloatPaths = @(
             "C:\Program Files\Microsoft Visual Studio",
             "C:\Program Files (x86)\Microsoft Visual Studio",
@@ -64,8 +61,6 @@ jobs:
               Write-Host "Removed: $path"
             }
           }
-
-          # Clear temp
           Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Max Performance Power Plan & Visual Effects Off
@@ -73,7 +68,6 @@ jobs:
           Write-Host "Setting max performance mode..."
           powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
 
-          # Kill ALL visual effects — animations, shadows, transparency
           $regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
           New-Item -Path $regPath -Force -ErrorAction SilentlyContinue | Out-Null
           Set-ItemProperty -Path $regPath -Name "VisualFXSetting" -Value 2 -ErrorAction SilentlyContinue
@@ -82,29 +76,15 @@ jobs:
           Set-ItemProperty -Path $perfPath -Name "UserPreferencesMask" -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)) -ErrorAction SilentlyContinue
           Set-ItemProperty -Path $perfPath -Name "DragFullWindows" -Value "0" -ErrorAction SilentlyContinue
 
-          # Disable transparency
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 0 -ErrorAction SilentlyContinue
 
       - name: Set Virtual Memory / Page File to Max
         run: |
           Write-Host "Boosting virtual memory (page file) for more usable RAM..."
-          $cs = Get-WmiObject Win32_ComputerSystem
-          $cs.AutomaticManagedPagefile = $false
-          $cs.Put() | Out-Null
-
-          # Set page file: 8GB initial, 16GB max — acts like extra RAM
-          $pagefile = Get-WmiObject Win32_PageFileSetting -ErrorAction SilentlyContinue
-          if ($pagefile) {
-            $pagefile.InitialSize = 8192
-            $pagefile.MaximumSize = 16384
-            $pagefile.Put() | Out-Null
-          } else {
-            Set-WmiInstance -Class Win32_PageFileSetting -Arguments @{
-              Name = "C:\pagefile.sys"
-              InitialSize = 8192
-              MaximumSize = 16384
-            } | Out-Null
-          }
+          wmic computersystem where name="%computername%" set AutomaticManagedPagefile=False
+          wmic pagefileset delete
+          wmic pagefileset create name="C:\pagefile.sys"
+          wmic pagefileset where name="C:\\pagefile.sys" set InitialSize=8192,MaximumSize=16384
           Write-Host "Virtual RAM boosted: 8GB-16GB page file set"
 
       - name: Wipe Desktop Icons
@@ -123,8 +103,7 @@ jobs:
           $dst = "$env:TEMP\AnyDesk.exe"
           Invoke-WebRequest -Uri $url -OutFile $dst
 
-          $installDir = "C:\Program Files
-          (x86)\AnyDesk"
+          $installDir = "C:\Program Files (x86)\AnyDesk"
           if (-not (Test-Path $installDir)) { New-Item -ItemType Directory -Path $installDir -Force | Out-Null }
           Start-Process $dst -ArgumentList "--install `"$installDir`"", "--silent", "--start-with-win" -Wait
           Remove-Item $dst -ErrorAction SilentlyContinue
@@ -137,6 +116,7 @@ jobs:
           cmd.exe /c "echo ${{ env.ANYDESK_PASS }} | `"$ad`" --set-password"
 
           New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableUIADesktopToggle" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
+
           $tsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations"
           New-ItemProperty -Path $tsPath -Name "TouchMode" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
           New-ItemProperty -Path $tsPath -Name "EnableTouchInjection" -PropertyType DWord -Value 1 -Force -ErrorAction SilentlyContinue
@@ -144,26 +124,10 @@ jobs:
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarGlomLevel" -Value 0 -ErrorAction SilentlyContinue
           Start-Process -FilePath $ad -ArgumentList "--restart-service" -Wait
 
-      - name: Install Mesa3D Software GPU (Prevents Game Crashes)
-        run: |
-          Write-Host "Installing Mesa3D OpenGL software renderer..."
-          $mesaUrl = ""
-          $mesaDst = "$env:TEMP\mesa.7z"
-          Invoke-WebRequest -Uri $mesaUrl -OutFile $mesaDst
-
-          # Extract and deploy system-wide
-          7z x $mesaDst -o"$env:TEMP\mesa" -y
-          $mesaDll = Get-ChildItem -Path "$env:TEMP\mesa" -Recurse -Filter "opengl32.dll" | Where-Object { $_.Directory.Name -eq "x64" } | Select-Object -First 1
-          if ($mesaDll) {
-            Copy-Item $mesaDll.FullName -Destination "C:\Windows\System32\opengl32.dll" -Force -ErrorAction SilentlyContinue
-            Write-Host "Mesa3D deployed — software GPU active"
-          }
-
       - name: Minimize Windows & Set Low Resolution
         run: |
           $shell = New-Object -ComObject Shell.Application
           $shell.MinimizeAll()
-          # Lower res = less GPU load = more FPS
           Set-DisplayResolution -Width 1280 -Height 720 -Force -ErrorAction SilentlyContinue
 
       - name: Download & Install Opera GX
@@ -185,7 +149,10 @@ jobs:
 
       - name: Keep Alive
         run: |
-          Write-Host "RDP is live — Password: ${{ env.ANYDESK_PASS }}"
-          Write-Host "Virtual RAM: 8-16GB page file active"
-          Write-Host "Resolution: 1280x720 for max FPS"
+          Write-Host "========================================="
+          Write-Host "  RDP LIVE — AnyDesk Password: ${{ env.ANYDESK_PASS }}"
+          Write-Host "  Virtual RAM: 8-16GB page file"
+          Write-Host "  Resolution: 1280x720"
+          Write-Host "  All bloat removed, max performance ON"
+          Write-Host "========================================="
           Start-Sleep -Seconds (${{ env.RUNTIME_MINUTES }} * 60)
