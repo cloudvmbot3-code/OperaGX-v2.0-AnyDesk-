@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 350
 
     env:
-      ANYDESK_PASS: ${{ secrets.ANYDESK_PASS }}
+      ANYDESK_PASS: Pass@1234
 
     steps:
       - name: Kill Background Services & Free RAM
@@ -167,7 +167,6 @@ jobs:
         run: |
           Write-Host "Installing Mesa3D for software OpenGL..."
 
-          # Download Mesa3D release
           $mesaPage = Invoke-RestMethod "https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest"
           $mesaAsset = $mesaPage.assets | Where-Object { $_.name -match "release-msvc.*\.7z$" } | Select-Object -First 1
           $mesaUrl = $mesaAsset.browser_download_url
@@ -176,15 +175,12 @@ jobs:
 
           Invoke-WebRequest -Uri $mesaUrl -OutFile $mesaArchive
 
-          # Install 7-Zip if not available
           if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) {
-            $7zPage = Invoke-RestMethod "" -ErrorAction SilentlyContinue
             choco install 7zip -y --no-progress 2>$null
           }
 
           & "C:\Program Files\7-Zip\7z.exe" x $mesaArchive -o"$mesaDir" -y
 
-          # Find the x64 opengl32.dll
           $mesaDll = Get-ChildItem -Path $mesaDir -Recurse -Filter "opengl32.dll" | Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
 
           if ($mesaDll) {
@@ -194,14 +190,12 @@ jobs:
             [Environment]::SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "4.5", "Machine")
             [Environment]::SetEnvironmentVariable("LIBGL_ALWAYS_SOFTWARE", "true", "Machine")
 
-            # Copy to Java bin so Minecraft picks it up
             $javaDir = (Get-Command java -ErrorAction SilentlyContinue).Source | Split-Path
             if ($javaDir) {
               Copy-Item $mesaDll.FullName "$javaDir\opengl32.dll" -Force -ErrorAction SilentlyContinue
               Write-Host "Mesa3D copied to Java: $javaDir"
             }
 
-            # Also drop it in common TLauncher locations
             $tlPaths = @(
               "$env:APPDATA\.minecraft",
               "$env:APPDATA\.tlauncher",
