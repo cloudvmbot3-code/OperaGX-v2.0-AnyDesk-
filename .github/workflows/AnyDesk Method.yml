@@ -96,10 +96,68 @@ jobs:
           Remove-Item $dst -ErrorAction SilentlyContinue
 
       - name: Configure Unattended Access Password & Touch Injection
+        shell: cmd
+        run: |
+          set "AD=C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
+          if not exist "%AD%" set "AD=C:\Program Files\AnyDesk\AnyDesk.exe"
+          echo %ANYDESK_PASS% | "%AD%" --set-password
+
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v EnableUIADesktopToggle /t REG_DWORD /d 1 /f
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations" /v TouchMode /t REG_DWORD /d 1 /f
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations" /v EnableTouchInjection /t REG_DWORD /d 1 /f
+
+          "%AD%" --restart-service
+
+      - name: Get AnyDesk ID
         run: |
           $ad = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
           if (-not (Test-Path $ad)) { $ad = "C:\Program Files\AnyDesk\AnyDesk.exe" }
 
-          cmd.exe /c "echo ${{ env.ANYDESK_PASS }} | `"$ad`" --set-password"
+          for ($i = 1; $i -le 30; $i++) {
+            $id = & $ad --get-id 2>$null
+            if ($id -and $id -match '^\d+') {
+              Write-Host "========================================="
+              Write-Host "  YOUR ANYDESK ID: $id"
+              Write-Host "  PASSWORD: ${{ env.ANYDESK_PASS }}"
+              Write-Host "========================================="
+              break
+            }
+            Write-Host "Waiting for AnyDesk ID... attempt $i/30"
+            Start-Sleep -Seconds 5
+          }
+          if (-not $id -or $id -notmatch '^\d+') {
+            Write-Host "ERROR: AnyDesk failed to get an ID after 150 seconds"
+          }
 
-          New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableUI
+      - name: Minimize Windows & Set Low Resolution
+        run: |
+          $shell = New-Object -ComObject Shell.Application
+          $shell.MinimizeAll()
+          Set-DisplayResolution -Width 1280 -Height 720 -Force -ErrorAction SilentlyContinue
+
+      - name: Download & Install Opera GX
+        run: |
+          $url = "https://net.geo.opera.com/opera_gx/stable/windows?utm_source=inf&utm_medium=gx"
+          $installer = "$env:TEMP\OperaGXSetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "--silent=1", "--allusers=1", "--launchbrowser=0", "--desktopshortcut=1" -Wait
+
+          $operaExe = "$env:ProgramFiles\Opera GX\opera.exe"
+          if (-not (Test-Path $operaExe)) { $operaExe = "$env:ProgramFiles (x86)\Opera GX\opera.exe" }
+          Start-Process -FilePath $operaExe -ArgumentList "--no-first-run"
+
+          for ($i = 1; $i -le 15; $i++) {
+            $prefPath = "$env:APPDATA\Opera Software\Opera GX Stable\Default\Preferences"
+            if (Test-Path $prefPath) { break }
+            Start-Sleep -Seconds 2
+          }
+
+      - name: Keep Alive
+        run: |
+          Write-Host "========================================="
+          Write-Host "  RDP LIVE — AnyDesk Password: ${{ env.ANYDESK_PASS }}"
+          Write-Host "  Virtual RAM: 8-16GB page file"
+          Write-Host "  Resolution: 1280x720"
+          Write-Host "  Max performance mode ON"
+          Write-Host "========================================="
+          Start-Sleep -Seconds (${{ env.RUNTIME_MINUTES }} * 60)
